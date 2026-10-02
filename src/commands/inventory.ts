@@ -8,6 +8,8 @@ async function safe<T>(errors: Record<string, string>, key: string, fn: () => Pr
   try {
     return await fn();
   } catch (e: any) {
+    // Not a Firebase project, or nothing of this kind exists.
+    if (/not found|Requested entity was not found/i.test(e?.message || "")) return undefined;
     errors[key] = e?.message || String(e);
     return undefined;
   }
@@ -73,8 +75,7 @@ async function usage(project: string, has: (svc: string) => boolean, errors: Rec
     tasks.push(["firestoreWrites", "firestore.googleapis.com/document/write_ops_count", {}]);
     tasks.push(["firestoreBytes", "firestore.googleapis.com/storage/data_and_index_storage_bytes", { gauge: true }]);
   }
-  if (has("firebasehosting.googleapis.com"))
-    tasks.push(["hostingBytesSent", "firebasehosting.googleapis.com/network/sent_bytes_count", { groupBy: "resource.label.site_name" }]);
+  tasks.push(["hostingBytesSent", "firebasehosting.googleapis.com/network/sent_bytes_count", { groupBy: "resource.label.site_name" }]);
   if (has("storage.googleapis.com") || has("storage-component.googleapis.com"))
     tasks.push(["bucketBytes", "storage.googleapis.com/storage/total_bytes", { gauge: true, groupBy: "resource.label.bucket_name" }]);
   if (has("appengine.googleapis.com"))
@@ -114,13 +115,13 @@ async function inventoryProject(p: any, opts: { authCap: number }) {
     checks.push(safe(errors, key, fn).then((v) => void (out[key] = v)));
   };
 
-  add("firebaseApps", "firebase.googleapis.com", async () =>
+  add("firebaseApps", null, async () =>
     (await paged<any>(`https://firebase.googleapis.com/v1beta1/projects/${id}:searchApps`, "apps", { ...q, params: { pageSize: 100 } })).map(
       (a) => ({ platform: a.platform, name: a.displayName || null, appId: a.appId, namespace: a.namespace || null, state: a.state }),
     ),
   );
 
-  add("hostingSites", "firebasehosting.googleapis.com", async () => {
+  add("hostingSites", null, async () => {
     const sites = await paged<any>(`https://firebasehosting.googleapis.com/v1beta1/projects/${id}/sites`, "sites", q);
     return Promise.all(
       sites.map(async (s) => {
@@ -153,7 +154,7 @@ async function inventoryProject(p: any, opts: { authCap: number }) {
     );
   });
 
-  add("realtimeDatabases", "firebasedatabase.googleapis.com", async () =>
+  add("realtimeDatabases", null, async () =>
     (await paged<any>(`https://firebasedatabase.googleapis.com/v1beta/projects/${id}/locations/-/instances`, "instances", q)).map((i) => ({
       name: i.name.split("/").pop(),
       url: i.databaseUrl,
@@ -162,7 +163,7 @@ async function inventoryProject(p: any, opts: { authCap: number }) {
     })),
   );
 
-  add("auth", "identitytoolkit.googleapis.com", () =>
+  add("auth", null, () =>
     authSummary(id, opts.authCap).catch((e) => {
       if (/CONFIGURATION_NOT_FOUND/.test(e.message)) return null; // Auth never set up
       throw e;
